@@ -45,3 +45,6 @@ class Texture(object):
             return self.pixels[y][x]
         else:
             return color(0,0,0)
+    
+    def getPlaneColors(self, x, y):
+        return self.pixels[y][x]

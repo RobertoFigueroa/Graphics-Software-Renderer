@@ -22,6 +22,9 @@ def sum(v0, v1):
 def sub(v0, v1):
     return V3(v0.x - v1.x, v0.y - v1.y, v0.z - v1.z)
 
+def subV2(v0,v1):
+	return V2(v0.x -v1.x, v0.y - v1.y)
+
 def mul(v0, k):
     return V3(v0.x * k, v0.y * k, v0.z *k)
 
@@ -143,12 +146,26 @@ class Render(object):
 		self.light = V3(0,0,1)
 		self.active_texture = None
 		self.active_shader = None
+		self.active_normalMap = None
+		self.transparency = 0.5
 		self.camPosition = V3(0,0,0)
 		self.camRotation = V3(0,0,0)
 		self.glCreateWindow(width, height)
-		self.glClear()
 		self.createViewMatrix()
 		self.createProjectionMatrix()
+		self.bk_texture = None
+
+	def setBackground(self):
+		if self.bk_texture:
+			for x in range(0, self.width-1):
+				for y in range(0, self.height-1):
+					txColor = self.bk_texture.getPlaneColors(x,y)
+					b = txColor[0] / 255
+					g = txColor[1] / 255
+					r = txColor[2] / 255
+					self.glVertex_coord(x,y, color(r,g,b))
+
+        
 
 	def createViewMatrix(self):
 		camMatrix = self.createObjectMatrix(translate=self.camPosition, rotate=self.camRotation)
@@ -188,6 +205,7 @@ class Render(object):
 		self.width = width
 		self.height = height
 		self.glViewport(0,0,width,height)
+		self.glClear()
 
 	def glInit(self):
 		self.curr_color = BLACK
@@ -241,7 +259,7 @@ class Render(object):
 			pass
 
 	def glColor(self, r, g, b):
-		self.curr_color = color(round(r * 255), round(g * 255), round(b * 255))
+		self.curr_color = color(round(r / 255), round(g / 255), round(b / 255))
 
 	def point(self, x, y):
 		self.framebuffer[x][y] = self.curr_color
@@ -361,14 +379,24 @@ class Render(object):
 	def transform(self, vertex, vMatrix):
 
 		augVertex= [vertex[0], vertex[1], vertex[2], 1]
-		transVertex = matXvect(self.viewportMatrix, matXvect(self.projectionMatrix, matXvect(self.viewMatrix, matXvect(vMatrix, augVertex)[0])[0])[0])
+		transVertex = matXvect(vMatrix, augVertex)
 
 		transVertex = 	V3(transVertex[0][0] / transVertex[0][3],
 						transVertex[0][1] / transVertex[0][3],
 						transVertex[0][2] / transVertex[0][3])
 
-		print(transVertex)		
 		return transVertex
+
+	def camTransform(self, vertex):
+		augVertex = V4( vertex[0], vertex[1], vertex[2], 1)
+		transVertex = matXvect(self.viewportMatrix,matXvect(self.projectionMatrix,matXvect(self.viewMatrix, augVertex)[0])[0])[0]
+		
+		transVertex = V3(transVertex[0] / transVertex[3],
+							transVertex[1] / transVertex[3],
+							transVertex[2] / transVertex[3])
+		print(transVertex)
+		return transVertex
+
 
 	def dirTransform(self, vertex, vMatrix):
 
@@ -450,11 +478,22 @@ class Render(object):
 				if vertCount > 3:
 					v3 = model.vertices[ face[3][0] - 1 ]
 
-				v0 = self.transform(v0,modelMatrix)
-				v1 = self.transform(v1,modelMatrix)
-				v2 = self.transform(v2,modelMatrix)
+			
+				v0 = self.transform(v0, modelMatrix)
+				v1 = self.transform(v1, modelMatrix)
+				v2 = self.transform(v2, modelMatrix)
+				A = v0
+				B = v1
+				C = v2
+
+				v0 = self.camTransform(v0)
+				v1 = self.camTransform(v1)
+				v2 = self.camTransform(v2)
+
 				if vertCount > 3:
-					v3 = self.transform(v3,modelMatrix)
+					v3 = self.transform(v3, modelMatrix)
+					D = v3
+					v3 = self.camTransform(v3)
 
 				if self.active_texture:
 					vt0 = model.texcoords[face[0][1] - 1]
@@ -472,6 +511,7 @@ class Render(object):
 					vt2 = V2(0,0) 
 					vt3 = V2(0,0)
 				
+				
 				vn0 = model.normals[face[0][2] - 1]
 				vn1 = model.normals[face[1][2] - 1]
 				vn2 = model.normals[face[2][2] - 1]
@@ -479,16 +519,16 @@ class Render(object):
 				vn0 = self.dirTransform(vn0, rotationMatrix)
 				vn1 = self.dirTransform(vn1, rotationMatrix)
 				vn2 = self.dirTransform(vn2, rotationMatrix)
-
+		
 				if vertCount > 3:
 					vn3 = model.normals[face[3][2] -1]
 					vn3 = self.dirTransform(vn3, rotationMatrix)
 				
 
 
-				self.triangle_bc(v0,v1,v2, texcoords = (vt0,vt1,vt2), normals= (vn0, vn1, vn2))
+				self.triangle_bc(v0,v1,v2, texcoords = (vt0,vt1,vt2), normals= (vn0, vn1, vn2), verts = (A, B, C))
 				if vertCount > 3: #asumamos que 4, un cuadrado
-					self.triangle_bc(v0,v2,v3, texcoords = (vt0,vt2,vt3), normals=(vn1, vn2, vn3))
+					self.triangle_bc(v0,v2,v3, texcoords = (vt0,vt2,vt3), normals=(vn1, vn2, vn3), verts = (A, B, D))
 
 	def drawPolygons(self, points):
 		
@@ -622,7 +662,7 @@ class Render(object):
 			flatTopTriangle(A,B,D)
 
     #Barycentric Coordinates
-	def triangle_bc(self, A, B, C, texcoords = (), normals = (), _color = None):
+	def triangle_bc(self, A, B, C, texcoords = (), normals = (),verts = (), _color = None):
 		#bounding box
 		minX = round(min(A.x, B.x, C.x))
 		minY = round(min(A.y, B.y, C.y))
@@ -644,10 +684,12 @@ class Render(object):
 						
 						r, g, b = self.active_shader(
 							self,
+							verts=verts,
 							baryCoords=(u,v,w),
 							texCoords = texcoords,
 							normals = normals,
-							color= _color or self.curr_color)
+							color= _color or self.curr_color,
+							pixel=V3(x,y,z))
 
 						self.glVertex_coord(x, y, color(r,g,b))
 						self.zbuffer[y][x] = z
